@@ -1,0 +1,60 @@
+# Dart / Flutter
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+doc/api/
+.flutter-versions
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.history/
+
+# Android
+**/android/.gradle/
+**/android/.kotlin/
+**/android/captures/
+**/android/local.properties
+**/android/**/GeneratedPluginRegistrant.java
+**/android/key.properties
+*.jks
+*.keystore
+
+# iOS / macOS
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/ephemeral/
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/Pods/
+**/macos/Flutter/GeneratedPluginRegistrant.swift
+**/macos/Flutter/ephemeral/
+**/macos/Pods/
+**/Podfile.lock
+**/.symlinks/
+xcuserdata/
+*.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings
+DerivedData/
+
+# Linux / Windows / CMake bundles
+**/linux/flutter/ephemeral/
+**/windows/flutter/ephemeral/
+**/elinux/flutter/ephemeral/
+generated_plugin_registrant.*
+generated_plugins.cmake
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / temp
+*.log
+*.tmp
