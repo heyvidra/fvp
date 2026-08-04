@@ -538,8 +538,14 @@ FVP_EXPORT bool MdkSnapshot(int64_t handle, int64_t texId, int w, int h, void* p
             .value = {
                 .as_typed_data = {
                     .type = Dart_TypedData_kUint8,
-                    .length = ret->stride * ret->height,
-                    .values = ret->data,
+                    // PATCH(vidra): mdk invokes this callback with a NULL
+                    // request when the snapshot failed (no frame decoded yet,
+                    // EOF, renderer torn down). Upstream dereferences it
+                    // unconditionally and the process dies with SIGSEGV at
+                    // ret->stride — seen in the field. An empty buffer is
+                    // what the Dart side already maps to `null`.
+                    .length = ret ? ret->stride * ret->height : 0,
+                    .values = ret ? ret->data : nullptr,
                 },
             }
         };
