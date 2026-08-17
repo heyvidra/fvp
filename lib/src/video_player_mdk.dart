@@ -145,7 +145,6 @@ class MdkVideoPlayerPlatform extends VideoPlayerPlatform {
   static int _lowLatency = 0;
   static int _seekFlags = mdk.SeekFlag.fromStart | mdk.SeekFlag.inCache;
   static List<String>? _decoders;
-  static final _mdkLog = Logger('mdk');
   // _prevImpl: required if registerWith() can be invoked multiple times by user
   static VideoPlayerPlatform? _prevImpl;
 
@@ -227,25 +226,17 @@ class MdkVideoPlayerPlatform extends VideoPlayerPlatform {
   }
 
   static void _setupMdk() {
-    mdk.setLogHandler((level, msg) {
-      if (msg.endsWith('\n')) {
-        msg = msg.substring(0, msg.length - 1);
-      }
-      switch (level) {
-        case mdk.LogLevel.error:
-          _mdkLog.severe(msg);
-        case mdk.LogLevel.warning:
-          _mdkLog.warning(msg);
-        case mdk.LogLevel.info:
-          _mdkLog.info(msg);
-        case mdk.LogLevel.debug:
-          _mdkLog.fine(msg);
-        case mdk.LogLevel.all:
-          _mdkLog.finest(msg);
-        default:
-          return;
-      }
-    });
+    // PATCH(vidra): do not bridge mdk's logs into Dart. mdk calls the log
+    // handler from its own decoder/demuxer threads, and the handler posts to a
+    // Dart port; on app quit the last engine tears the VM down while those
+    // threads are still running, so Dart_PostCObject lands in a Zone whose
+    // VirtualMemory is already cleaned up and aborts the process (SIGABRT in
+    // dart::Zone::Segment::New, reported as "Out of memory" for a 1.4KB
+    // allocation). setLogHandler(null) clears the native gCallbackTypes bit,
+    // so the callback returns before it ever touches Dart. mdk still logs to
+    // its own sink; an app that wants the logs in Dart can call
+    // mdk.setLogHandler() itself and own the shutdown ordering.
+    mdk.setLogHandler(null);
     // mdk.setGlobalOptions('plugins', 'mdk-braw');
     mdk.setGlobalOption("log", "all");
     mdk.setGlobalOption('d3d11.sync.cpu', 1);
