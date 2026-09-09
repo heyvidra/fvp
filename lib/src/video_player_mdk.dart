@@ -226,17 +226,30 @@ class MdkVideoPlayerPlatform extends VideoPlayerPlatform {
   }
 
   static void _setupMdk() {
-    // PATCH(vidra): do not bridge mdk's logs into Dart. mdk calls the log
-    // handler from its own decoder/demuxer threads, and the handler posts to a
-    // Dart port; on app quit the last engine tears the VM down while those
-    // threads are still running, so Dart_PostCObject lands in a Zone whose
-    // VirtualMemory is already cleaned up and aborts the process (SIGABRT in
-    // dart::Zone::Segment::New, reported as "Out of memory" for a 1.4KB
-    // allocation). setLogHandler(null) clears the native gCallbackTypes bit,
-    // so the callback returns before it ever touches Dart. mdk still logs to
-    // its own sink; an app that wants the logs in Dart can call
-    // mdk.setLogHandler() itself and own the shutdown ordering.
-    mdk.setLogHandler(null);
+    // PATCH(vidra): do NOT touch mdk's log handler at all -- not even to clear
+    // it. setLogHandler() reaches _GlobalCallbacks.instance, and merely
+    // constructing that lazy singleton calls MdkCallbacksRegisterPort(0, ...),
+    // which installs a C++ lambda as mdk's log handler (callbacks.cpp:60) and
+    // registers a Dart port. Passing null then only clears the gCallbackTypes
+    // bit, so the lambda stays installed and drops every line -- while mdk's
+    // own stderr sink, which it replaced, is gone for good. Measured: a
+    // 25-minute run under MDK_LOG=all emitted the startup banner and nothing
+    // else, including through the Metal aborts we were trying to diagnose.
+    //
+    // Not calling it is strictly safer than calling it with null. The hazard
+    // the previous patch guarded against -- mdk's decoder threads posting to a
+    // Dart port while the last engine tears the VM down, SIGABRT in
+    // dart::Zone::Segment::New reported as "Out of memory" for a 1.4KB
+    // allocation -- requires a registered port, and _GlobalCallbacks is
+    // referenced from nowhere else (global.dart:261). Never constructing it
+    // means no port is ever registered and that crash is unreachable.
+    //
+    // The payoff is diagnosis: mdk keeps its own sink and prints
+    // `Metal pixel format %d: %s, size: %dx%d, %s layer` on the straight-line
+    // path immediately before the texture descriptor that aborts the process
+    // on an invalid format. That single line names the plane and the layer.
+    // An app that wants the logs in Dart can still call mdk.setLogHandler()
+    // itself and own the shutdown ordering.
     // mdk.setGlobalOptions('plugins', 'mdk-braw');
     mdk.setGlobalOption("log", "all");
     mdk.setGlobalOption('d3d11.sync.cpu', 1);
