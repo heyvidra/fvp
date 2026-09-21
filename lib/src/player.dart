@@ -9,6 +9,7 @@ import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:ffi/ffi.dart';
+import 'package:logging/logging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 
@@ -18,6 +19,8 @@ import 'global.dart';
 import 'media_info.dart';
 import 'lib.dart';
 import 'extensions.dart';
+
+final _log = Logger('fvp');
 
 class Player {
   int get nativeHandle => _player.address;
@@ -173,14 +176,32 @@ class Player {
   }
 
   /// Release resources
-  void dispose() async {
+  Future<void> dispose() async {
     if (_pp == nullptr) {
       textureId.dispose();
       return;
     }
     // await: ensure no player ref in fvp plugin before mdkPlayerAPI_delete() in dart
     await updateTexture(width: -1);
-    state = PlaybackState.stopped;
+    // PATCH(vidra): setState() and mdkPlayerAPI_delete() both block until mdk's
+    // decode/render threads acknowledge, and mdk's audio-stop path can wait
+    // forever on a semaphore that the already-exited audio thread was supposed
+    // to signal -- seen after the output device churns across a sleep/wake.
+    // On the Dart UI thread that freezes the whole app: nothing rebuilds, so
+    // the window sticks on its last frame while AppKit keeps pumping events.
+    // It looks dead even though the main thread is idle and healthy. Run both
+    // on a throwaway isolate with a deadline instead.
+    final playerAddr = _player.address;
+    final stopped = PlaybackState.stopped.rawValue;
+    _state = PlaybackState.stopped;
+    await awaitMdk(() {
+      final p = Pointer<mdkPlayerAPI>.fromAddress(playerAddr);
+      p.ref.setState.asFunction<void Function(Pointer<mdkPlayer>, int)>()(
+        p.ref.object,
+        stopped,
+      );
+    }, what: 'setState(stopped)');
+
     Libfvp.unregisterPort(nativeHandle);
     _eventCb.close();
     Libfvp.unregisterType(nativeHandle, 0);
@@ -191,10 +212,42 @@ class Player {
 
     _receivePort.close();
 
-    Libmdk.instance.mdkPlayerAPI_delete(_pp);
-    calloc.free(_pp);
+    final ppAddr = _pp.address;
     _pp = nullptr;
     textureId.dispose();
+    if (await awaitMdk(
+      () => Libmdk.instance.mdkPlayerAPI_delete(
+        Pointer<Pointer<mdkPlayerAPI>>.fromAddress(ppAddr),
+      ),
+      what: 'mdkPlayerAPI_delete',
+    )) {
+      calloc.free(Pointer<Pointer<mdkPlayerAPI>>.fromAddress(ppAddr));
+    }
+    // else: that isolate is still inside delete() and still owns the
+    // allocation -- freeing it here would be a use-after-free race.
+  }
+
+  /// PATCH(vidra): run one blocking mdk call off the Dart UI thread.
+  ///
+  /// Returns false when it misses the deadline. That isolate then stays
+  /// blocked for the life of the process and whatever it holds is leaked on
+  /// purpose: one leaked player beats a window that never redraws again.
+  // ponytail: fixed 5s deadline and no cancellation -- Isolate.run() gives no
+  // way to kill a thread parked in a native call. Make it configurable only if
+  // a real machine turns out to need longer to stop a player.
+  @visibleForTesting
+  static Future<bool> awaitMdk(
+    void Function() call, {
+    String what = 'call',
+    Duration deadline = const Duration(seconds: 5),
+  }) async {
+    try {
+      await Isolate.run(call).timeout(deadline);
+      return true;
+    } on TimeoutException {
+      _log.warning('mdk $what did not return in $deadline; leaking the player');
+      return false;
+    }
   }
 
   /// Release current texture then create a new one for current [media], and update [textureId].

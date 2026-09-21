@@ -38,14 +38,16 @@ class MdkVideoPlayer extends mdk.Player {
   final _subscriptions = <StreamSubscription>[];
 
   @override
-  void dispose() {
+  Future<void> dispose() async {
     for (final sub in _subscriptions) {
       sub.cancel();
     }
     _subscriptions.clear();
     streamCtl.close();
     _initialized = false;
-    super.dispose();
+    // PATCH(vidra): Player.dispose() is now awaitable -- it hands mdk's two
+    // blocking teardown calls to an isolate so they cannot freeze the UI.
+    await super.dispose();
   }
 
   MdkVideoPlayer() : super() {
@@ -293,7 +295,7 @@ class MdkVideoPlayerPlatform extends VideoPlayerPlatform {
 
   @override
   Future<void> dispose(int playerId) async {
-    _players.remove(playerId)?.dispose();
+    await _players.remove(playerId)?.dispose();
   }
 
   @override
